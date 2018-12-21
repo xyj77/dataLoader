@@ -96,14 +96,66 @@ def saveSlice(patientNo, tumourNo, modal, Bbox, tumourInfo, saveNeg=False):
     if not os.path.exists(saveDir):
         os.makedirs(saveDir)    
     for slice in range(tumourLoc[4], tumourLoc[5]+1):
-        sampleName = patientNo + '_' + str(tumourNo) + '_' + modal + '_' + str(slice) + '.jpg'
+        sampleName = patientNo + '_' + str(tumourNo) + '_' + modal + '_' + str(slice)\
+                               + '_' + str(tumourWHO) + '_' + str(tumourEd) + '.jpg'
         roi = Bbox[:, :, slice-tumourLoc[4]]
         savePath = os.path.join(saveDir, sampleName)
         misc.imsave(savePath, roi)
         print(savePath+' saved!')
         
-def saveFusion(patientNo, tumourNo, negBboxs, BboxInfo, saveNeg=True):
-    pass
+def saveFusion(patientNo, tumourNo, Bboxs, BboxInfo, fusionName, saveNeg=False):
+    tumourWHO = BboxInfo[0]['WHO']
+    tumourEd = int(BboxInfo[0]['Edmondson'])
+    saveDir = os.path.join(os.path.join(SAVE_DIR, fusionName), 'Pos')
+    if saveNeg:
+        saveDir = os.path.join(os.path.join(SAVE_DIR, fusionName), 'Neg')
+    if not os.path.exists(saveDir):
+        os.makedirs(saveDir)   
+
+    tumourSize = Bboxs[0].shape
+    # 保存融合图像
+    picMat = np.zeros((tumourSize[0], tumourSize[1], len(BboxInfo)))
+    
+    # 计算能够在上下两端保存多少张图像
+    upSlice, bottomSlice = [], [] #中间序列所在层面(同时对应中间层面上面的层面数), 中间层面下的层面数
+    for info in BboxInfo:
+        tumourLoc = [int(x) for x in info['Location'][1:-1].split(',')]
+        serNo, Z1, Z2 = info['serNo'], tumourLoc[4], tumourLoc[5]
+        upSlice.append(serNo-Z1)
+        bottomSlice.append(Z2-serNo)
+    up, bottom = min(upSlice), min(bottomSlice)
+    print(upSlice, bottomSlice, up, bottom)
+
+    # 保存中间层面
+    for index, info in enumerate(BboxInfo):
+        picMat[:, :, index] = Bboxs[index][:, :, upSlice[index]]
+    sampleName = patientNo + '_' + str(tumourNo) + '_' + fusionName + '_0'\
+                           + '_' + str(tumourWHO) + '_' + str(tumourEd) + '.jpg'
+    savePath = os.path.join(saveDir, sampleName)
+    misc.imsave(savePath, picMat)
+    print(savePath+' saved!')
+    
+    # 保存上面层面
+    for i in range(up):
+        for index, info in enumerate(BboxInfo):
+            picMat[:, :, index] = Bboxs[index][:, :, i]
+        sampleName = patientNo + '_' + str(tumourNo) + '_' + fusionName + '_' + str(i-up)\
+                               + '_' + str(tumourWHO) + '_' + str(tumourEd) + '.jpg'
+        savePath = os.path.join(saveDir, sampleName)
+        misc.imsave(savePath, picMat)
+        print(savePath+' saved!')
+        
+    # 保存下面层面
+    for i in range(bottom):
+        for index, info in enumerate(BboxInfo):
+            picMat[:, :, index] = Bboxs[index][:, :, upSlice[index]+i+1]
+        sampleName = patientNo + '_' + str(tumourNo) + '_' + fusionName + '_' + str(i+1)\
+                               + '_' + str(tumourWHO) + '_' + str(tumourEd) + '.jpg'
+        savePath = os.path.join(saveDir, sampleName)
+        misc.imsave(savePath, picMat)
+        print(savePath+' saved!')
+    
+    
 
 def readModalData(modal = 'A'):
     '''
@@ -143,9 +195,10 @@ def readPatientData(Fusion = ['A', 'B', 'K']):
         labels = readLabel(asIndex = 'patientNo', index = patientNo)
         for tumourNo in range(len(labels)/8):
             Info = labels.loc[tumourNo+1]
-            posBboxs, negBboxs, BboxInfo = [], [], []
+            posBboxs, negBboxs, BboxInfo, fusionName = [], [], [], ''
             for modal in Fusion:
                 # 读取MRI体数据 512x512xS
+                fusionName = fusionName + modal
                 dataDir = os.path.join(MAT_DATA_DIR, patientNo)
                 dataPath = os.path.join(dataDir, modal+'.mat')
                 liverVolume = sio.loadmat(dataPath)['D']
@@ -160,11 +213,11 @@ def readPatientData(Fusion = ['A', 'B', 'K']):
                 negBboxs.append(negBbox)
                 BboxInfo.append(tumourInfo)           
             
-            print(len(posBboxs), len(negBboxs), len(BboxInfo))
-            saveFusion(patientNo, tumourNo, posBboxs, BboxInfo)
-            saveFusion(patientNo, tumourNo, negBboxs, BboxInfo, saveNeg=True)
+            # print(len(posBboxs), len(negBboxs), len(BboxInfo))
+            saveFusion(patientNo, tumourNo, posBboxs, BboxInfo, fusionName)
+            saveFusion(patientNo, tumourNo, negBboxs, BboxInfo, fusionName, saveNeg=True)
             
-        raw_input()
+        # raw_input()
         
         
 def main():
@@ -172,8 +225,9 @@ def main():
     # readModalData(modal='A')
     # readModalData(modal='B')
     # readModalData(modal='K')
-    # 按照个体读取
-    readPatientData(Fusion = ['A', 'B', 'K'])
+    # # 按照个体读取
+    # readPatientData(Fusion = ['A', 'B', 'K'])
+    readPatientData(Fusion = ['E', 'F', 'G'])
   
 if __name__ == "__main__":
     main()
