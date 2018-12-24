@@ -9,7 +9,7 @@ import scipy.misc as misc
 BBOX_DATA_DIR = '../../Data/BboxAug'
 MAT_DATA_DIR = '/media/lab304/J52/Dataset/Mat'
 LABEL_PATH = '../../Data/labels.csv'
-SAVE_DIR = '../../Data/ROI'
+SAVE_DIR = '../../Data'
 
 def readLabel(asIndex = 'modalNo', index = 'A'):
     '''Read labels
@@ -85,32 +85,77 @@ def readBbox(liverVolume, tumourInfo, saveNeg=False):
                        tumourCenter[1]-tumourSize[1]/2:tumourCenter[1]+tumourSize[1]/2+1,
                        tumourLoc[4]:tumourLoc[5]+1]
 
-def saveSlice(patientNo, tumourNo, modal, Bbox, tumourInfo, saveNeg=False):
+def saveSlice(patientNo, tumourNo, modal, Bbox, tumourInfo, standard, saveNeg=False):
+    if saveNeg and patientNo in ['00431620', '03930451']:
+        return
     pattern = re.compile(r'[\d]')
     tumourLoc = [int(x) for x in tumourInfo['Location'][1:-1].split(',') if pattern.search(x)]
+    serNo = tumourInfo['serNo']
     tumourWHO = tumourInfo['WHO']
     tumourEd = int(tumourInfo['Edmondson'])
-    saveDir = os.path.join(os.path.join(SAVE_DIR, modal), 'Pos')
-    if saveNeg:
-        saveDir = os.path.join(os.path.join(SAVE_DIR, modal), 'Neg')
+    # 确定存储目录
+    saveDir = os.path.join(os.path.join(SAVE_DIR, standard), modal)
+    if standard is 'Binary':
+        if saveNeg:
+            saveDir = os.path.join(saveDir, '0')
+        else:
+            saveDir = os.path.join(saveDir, '1')
+    else:
+        if standard is 'WHO':
+            saveDir = os.path.join(saveDir, str(tumourWHO-1))
+        else:
+            saveDir = os.path.join(saveDir, str(tumourEd-1))
     if not os.path.exists(saveDir):
-        os.makedirs(saveDir)    
-    for slice in range(tumourLoc[4], tumourLoc[5]+1):
-        sampleName = patientNo + '_' + str(tumourNo) + '_' + modal + '_' + str(slice)\
+        os.makedirs(saveDir)
+        
+    up, bottom = serNo-tumourLoc[4], tumourLoc[5]-serNo
+    up, bottom = int(up*0.75+0.5), int(bottom*0.75+0.5)
+    # 保存中间层面
+    roi = Bbox[:, :, up]
+    sampleName = patientNo + '_' + str(tumourNo) + '_' + modal + '_0_'\
+                           + '_' + str(tumourWHO) + '_' + str(tumourEd) + '.jpg'
+    savePath = os.path.join(saveDir, sampleName)
+    misc.imsave(savePath, roi)
+    
+    print(savePath+' saved!')
+    
+    # 保存上面层面
+    for i in range(up):
+        sampleName = patientNo + '_' + str(tumourNo) + '_' + modal + '_' + str(-1-i)\
                                + '_' + str(tumourWHO) + '_' + str(tumourEd) + '.jpg'
-        roi = Bbox[:, :, slice-tumourLoc[4]]
+        roi = Bbox[:, :, up-i-1]
         savePath = os.path.join(saveDir, sampleName)
         misc.imsave(savePath, roi)
         print(savePath+' saved!')
         
-def saveFusion(patientNo, tumourNo, Bboxs, BboxInfo, fusionName, saveNeg=False):
+    # 保存下面层面
+    for i in range(bottom):
+        sampleName = patientNo + '_' + str(tumourNo) + '_' + modal + '_' + str(i+1)\
+                               + '_' + str(tumourWHO) + '_' + str(tumourEd) + '.jpg'
+        roi = Bbox[:, :, up+i+1]
+        savePath = os.path.join(saveDir, sampleName)
+        misc.imsave(savePath, roi)
+        print(savePath+' saved!')
+        
+def saveFusion(patientNo, tumourNo, Bboxs, BboxInfo, fusionName, standard, saveTpye, saveNeg=False):
+    if saveNeg and patientNo in ['00431620', '03930451']:
+        return
     tumourWHO = BboxInfo[0]['WHO']
     tumourEd = int(BboxInfo[0]['Edmondson'])
-    saveDir = os.path.join(os.path.join(SAVE_DIR, fusionName), 'Pos')
-    if saveNeg:
-        saveDir = os.path.join(os.path.join(SAVE_DIR, fusionName), 'Neg')
+    # 确定存储目录
+    saveDir = os.path.join(os.path.join(SAVE_DIR, standard), fusionName)
+    if standard is 'Binary':
+        if saveNeg:
+            saveDir = os.path.join(saveDir, '0')
+        else:
+            saveDir = os.path.join(saveDir, '1')
+    else:
+        if standard is 'WHO':
+            saveDir = os.path.join(saveDir, str(tumourWHO-1))
+        else:
+            saveDir = os.path.join(saveDir, str(tumourEd-1))
     if not os.path.exists(saveDir):
-        os.makedirs(saveDir)   
+        os.makedirs(saveDir)
 
     tumourSize = Bboxs[0].shape
     # 保存融合图像
@@ -124,25 +169,32 @@ def saveFusion(patientNo, tumourNo, Bboxs, BboxInfo, fusionName, saveNeg=False):
         upSlice.append(serNo-Z1)
         bottomSlice.append(Z2-serNo)
     up, bottom = min(upSlice), min(bottomSlice)
-    print(upSlice, bottomSlice, up, bottom)
-
+    print(upSlice, bottomSlice, up, bottom, int(up*0.75+0.5), int(bottom*0.75+0.5))
+    # 去掉过于边缘的图像
+    up, bottom = int(up*0.75+0.5), int(bottom*0.75+0.5)
     # 保存中间层面
     for index, info in enumerate(BboxInfo):
         picMat[:, :, index] = Bboxs[index][:, :, upSlice[index]]
     sampleName = patientNo + '_' + str(tumourNo) + '_' + fusionName + '_0'\
-                           + '_' + str(tumourWHO) + '_' + str(tumourEd) + '.jpg'
+                           + '_' + str(tumourWHO) + '_' + str(tumourEd) + saveTpye
     savePath = os.path.join(saveDir, sampleName)
-    misc.imsave(savePath, picMat)
+    if saveTpye is 'jpg':
+        misc.imsave(savePath, picMat)
+    else:
+        np.save(savePath, picMat)
     print(savePath+' saved!')
     
     # 保存上面层面
     for i in range(up):
         for index, info in enumerate(BboxInfo):
-            picMat[:, :, index] = Bboxs[index][:, :, i]
-        sampleName = patientNo + '_' + str(tumourNo) + '_' + fusionName + '_' + str(i-up)\
-                               + '_' + str(tumourWHO) + '_' + str(tumourEd) + '.jpg'
+            picMat[:, :, index] = Bboxs[index][:, :, upSlice[index]-i-1]
+        sampleName = patientNo + '_' + str(tumourNo) + '_' + fusionName + '_' + str(-1-i)\
+                               + '_' + str(tumourWHO) + '_' + str(tumourEd) + saveTpye
         savePath = os.path.join(saveDir, sampleName)
-        misc.imsave(savePath, picMat)
+        if saveTpye is '.jpg':
+            misc.imsave(savePath, picMat)
+        else:
+            np.save(savePath, picMat)
         print(savePath+' saved!')
         
     # 保存下面层面
@@ -150,14 +202,15 @@ def saveFusion(patientNo, tumourNo, Bboxs, BboxInfo, fusionName, saveNeg=False):
         for index, info in enumerate(BboxInfo):
             picMat[:, :, index] = Bboxs[index][:, :, upSlice[index]+i+1]
         sampleName = patientNo + '_' + str(tumourNo) + '_' + fusionName + '_' + str(i+1)\
-                               + '_' + str(tumourWHO) + '_' + str(tumourEd) + '.jpg'
+                               + '_' + str(tumourWHO) + '_' + str(tumourEd) + saveTpye
         savePath = os.path.join(saveDir, sampleName)
-        misc.imsave(savePath, picMat)
+        if saveTpye is '.jpg':
+            misc.imsave(savePath, picMat)
+        else:
+            np.save(savePath, picMat)
         print(savePath+' saved!')
     
-    
-
-def readModalData(modal = 'A'):
+def readModalData(modal = 'A', standard = 'WHO'):
     '''
     指定模态读取数据
     '''   
@@ -177,15 +230,16 @@ def readModalData(modal = 'A'):
             # print(patientNo, tumourNo)
             # 读取肿瘤信息
             tumourInfo = patientInfo.iloc[tumourNo]
-            # 读取Bbox
+            # roi区域
             posBbox = readBbox(liverVolume, tumourInfo)
-            negBbox = readBbox(liverVolume, tumourInfo, saveNeg=True)
-            # 保存切片
-            saveSlice(patientNo, tumourNo, modal, posBbox, tumourInfo)
-            saveSlice(patientNo, tumourNo, modal, negBbox, tumourInfo, saveNeg=True)
+            saveSlice(patientNo, tumourNo, modal, posBbox, tumourInfo, standard)
             
-
-def readPatientData(Fusion = ['A', 'B', 'K']):
+            if standard is 'Binary':
+                # 背景区域
+                negBbox = readBbox(liverVolume, tumourInfo, saveNeg=True)
+                saveSlice(patientNo, tumourNo, modal, negBbox, tumourInfo, standard, saveNeg=True)
+            
+def readPatientData(Fusion = ['A', 'B', 'K'], standard = 'WHO', saveTpye = '.jpg'):
     '''
     按照病人读取多个模态数据
     '''
@@ -208,26 +262,54 @@ def readPatientData(Fusion = ['A', 'B', 'K']):
                     tumourInfo = Info.loc[modal]            
                 # 读取Bbox
                 posBbox = readBbox(liverVolume, tumourInfo)
-                negBbox = readBbox(liverVolume, tumourInfo, saveNeg=True)            
                 posBboxs.append(posBbox)
-                negBboxs.append(negBbox)
-                BboxInfo.append(tumourInfo)           
+                BboxInfo.append(tumourInfo)
+                if standard is 'Binary':
+                    negBbox = readBbox(liverVolume, tumourInfo, saveNeg=True) 
+                    negBboxs.append(negBbox)                    
             
-            # print(len(posBboxs), len(negBboxs), len(BboxInfo))
-            saveFusion(patientNo, tumourNo, posBboxs, BboxInfo, fusionName)
-            saveFusion(patientNo, tumourNo, negBboxs, BboxInfo, fusionName, saveNeg=True)
-            
-        # raw_input()
-        
+            saveFusion(patientNo, tumourNo, posBboxs, BboxInfo, fusionName, standard, saveTpye)
+            if standard is 'Binary':
+                saveFusion(patientNo, tumourNo, negBboxs, BboxInfo, fusionName, standard, saveTpye, saveNeg=True)
         
 def main():
+    # modalList = ['A', 'B', 'K', 'E', 'F', 'G', 'H', 'I', 'J']
+    # fusionList = ['ABK', 'EGJ']
     # # 按照模态读取
-    # readModalData(modal='A')
-    # readModalData(modal='B')
-    # readModalData(modal='K')
+    # for modal in modalList:
+        # readModalData(modal=modal, standard = 'WHO')
+        
     # # 按照个体读取
-    # readPatientData(Fusion = ['A', 'B', 'K'])
-    readPatientData(Fusion = ['E', 'F', 'G'])
+    # for fusion in fusionList:
+        # readPatientData(Fusion = list(fusion), standard = 'WHO')
+    
+    # # 按照模态读取
+    # for modal in modalList:
+        # readModalData(modal=modal, standard = 'Edmondson')
+        
+    # # 按照个体读取
+    # for fusion in fusionList:
+        # readPatientData(Fusion = list(fusion), standard = 'Edmondson')
+        
+        # # 按照模态读取
+    # for modal in modalList:
+        # readModalData(modal=modal, standard = 'Binary')
+        
+    # # 按照个体读取
+    # for fusion in fusionList:
+        # readPatientData(Fusion = list(fusion), standard = 'Binary')
+        
+    # fusionList = ['EFGHIJ', 'ABKEFGHIJ']   
+    fusionList = ['ABKEFGHIJ']     
+    # 按照个体读取
+    for fusion in fusionList:
+        readPatientData(Fusion = list(fusion), standard = 'WHO', saveTpye = '.npy')
+
+    for fusion in fusionList:
+        readPatientData(Fusion = list(fusion), standard = 'Edmondson', saveTpye = '.npy')
+
+    for fusion in fusionList:
+        readPatientData(Fusion = list(fusion), standard = 'Binary', saveTpye = '.npy')
   
 if __name__ == "__main__":
     main()
